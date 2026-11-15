@@ -1,42 +1,54 @@
-name: Build macOS App
+name: Build Strawberry macOS
 
 on:
   push:
-    branches: [ "main" ]
-  workflow_dispatch: # Allows you to trigger builds manually from the GitHub UI
+    branches: [ "master" ] # Note: Your fork uses 'master', not 'main'
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-latest # Uses GitHub's cloud Mac runner
+    runs-on: macos-latest # Runs on Apple Silicon (arm64)
 
     steps:
-      # 1. Download your repository code onto the Mac runner
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      # 2. (Optional) Select a specific Xcode version
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+      - name: Install build tools
+        run: brew install cmake ninja pkg-config
 
-      # 3. Compile the app (unsigned for testing/personal use)
-      - name: Build App
+      - name: Download pre-built macOS dependencies
         run: |
-          xcodebuild -project Strawberry.xcodeproj \
-            -scheme YourAppScheme \
-            -configuration Release \
-            -derivedDataPath build \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO
+          sudo mkdir -p /opt
+          # Fetches the latest arm64 release archive from strawberry-macos-dependencies
+          DEP_URL=$(curl -s https://github.com | grep "browser_download_url.*arm64.*\.tar\." | cut -d '"' -f 4 | head -n 1)
+          echo "Downloading $DEP_URL"
+          curl -L "$DEP_URL" -o /tmp/deps.tar.xz
+          sudo tar -xf /tmp/deps.tar.xz -C /opt
 
-      # 4. Zip the compiled .app bundle so you can download it
-      - name: Package App
+      - name: Configure with CMake
         run: |
-          cd build/Build/Products/Release
-          zip -r Strawberry-macOS.zip Strawberry.app
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=/opt/strawberry_macos_arm64_release \
+            -DUSE_BUNDLE=ON \
+            -DENABLE_SPARKLE=OFF
 
-      # 5. Upload the zipped app to GitHub
+      - name: Build and Bundle App
+        run: |
+          cmake --build build --parallel $(sysctl -n hw.ncpu)
+          cmake --install build --prefix build/install
+          # Package dependencies into the .app bundle
+          cd build && ninja deploy
+
+      - name: Package .app as ZIP
+        run: |
+          cd build
+          zip -r Strawberry-macOS-arm64.zip strawberry.app
+
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macos-app
-          path: build/Build/Products/Release/Strawberry-macOS.zip
+          name: strawberry-macos
+          path: build/Strawberry-macOS-arm64.zip
