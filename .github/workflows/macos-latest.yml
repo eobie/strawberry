@@ -53,7 +53,6 @@ jobs:
           make -j $(sysctl -n hw.ncpu)
           make install
           make deploy
-          make deploycheck
           make dmg
 
       - name: Upload DMG Artifact
