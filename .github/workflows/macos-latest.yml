@@ -2,12 +2,12 @@ name: Build Strawberry macOS
 
 on:
   push:
-    branches: [ "master" ] # Note: Your fork uses 'master', not 'main'
+    branches: [ "main", "master" ] # Triggers on either branch name
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-latest # Runs on Apple Silicon (arm64)
+    runs-on: macos-latest
 
     steps:
       - name: Checkout repository
@@ -15,40 +15,49 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install build tools
-        run: brew install cmake ninja pkg-config
-
-      - name: Download pre-built macOS dependencies
+      - name: Download and extract macOS dependencies
         run: |
-          sudo mkdir -p /opt
-          # Fetches the latest arm64 release archive from strawberry-macos-dependencies
-          DEP_URL=$(curl -s https://github.com | grep "browser_download_url.*arm64.*\.tar\." | cut -d '"' -f 4 | head -n 1)
-          echo "Downloading $DEP_URL"
-          curl -L "$DEP_URL" -o /tmp/deps.tar.xz
-          sudo tar -xf /tmp/deps.tar.xz -C /opt
+          ARCH=$(uname -m)
+          curl -f -O -L "https://github.com/strawberrymusicplayer/strawberry-macos-dependencies/releases/latest/download/strawberry-macos-${ARCH}-release.tar.xz"
+          sudo tar -C / -xf "strawberry-macos-${ARCH}-release.tar.xz"
+          rm "strawberry-macos-${ARCH}-release.tar.xz"
 
       - name: Configure with CMake
         run: |
-          cmake -S . -B build -G Ninja \
+          ARCH=$(uname -m)
+          DEPS="/opt/strawberry_macos_${ARCH}_release"
+          mkdir -p build
+          PKG_CONFIG_PATH="${DEPS}/lib/pkgconfig" \
+          LDFLAGS="-L${DEPS}/lib -Wl,-rpath,${DEPS}/lib" \
+          "${DEPS}/bin/cmake" -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=/opt/strawberry_macos_arm64_release \
             -DUSE_BUNDLE=ON \
-            -DENABLE_SPARKLE=OFF
+            -DCMAKE_PREFIX_PATH="${DEPS}/lib/cmake" \
+            -DPKG_CONFIG_EXECUTABLE="${DEPS}/bin/pkg-config" \
+            -DICU_ROOT="${DEPS}" \
+            -DMACDEPLOYQT_EXECUTABLE="${DEPS}/bin/macdeployqt" \
+            -DARCH="${ARCH}" \
+            -DENABLE_SPARKLE=OFF \
+            -DENABLE_QTSPARKLE=OFF
 
-      - name: Build and Bundle App
+      - name: Build, Deploy, and Create DMG
         run: |
-          cmake --build build --parallel $(sysctl -n hw.ncpu)
-          cmake --install build --prefix build/install
-          # Package dependencies into the .app bundle
-          cd build && ninja deploy
+          ARCH=$(uname -m)
+          DEPS="/opt/strawberry_macos_${ARCH}_release"
+          export GIO_EXTRA_MODULES="${DEPS}/lib/gio/modules"
+          export GST_PLUGIN_SCANNER="${DEPS}/libexec/gstreamer-1.0/gst-plugin-scanner"
+          export GST_PLUGIN_PATH="${DEPS}/lib/gstreamer-1.0"
+          export LIBSOUP_LIBRARY_PATH="${DEPS}/lib/libsoup-3.0.0.dylib"
 
-      - name: Package .app as ZIP
-        run: |
           cd build
-          zip -r Strawberry-macOS-arm64.zip strawberry.app
+          make -j $(sysctl -n hw.ncpu)
+          make install
+          make deploy
+          make deploycheck
+          make dmg
 
-      - name: Upload Build Artifact
+      - name: Upload DMG Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: strawberry-macos
-          path: build/Strawberry-macOS-arm64.zip
+          name: strawberry-macos-dmg
+          path: build/*.dmg
