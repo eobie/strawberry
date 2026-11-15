@@ -21,7 +21,7 @@ jobs:
       # 3. Compile the app (unsigned for testing/personal use)
       - name: Build App
         run: |
-          xcodebuild -project YourApp.xcodeproj \
+          xcodebuild -project Strawberry.xcodeproj \
             -scheme YourAppScheme \
             -configuration Release \
             -derivedDataPath build \
@@ -32,11 +32,11 @@ jobs:
       - name: Package App
         run: |
           cd build/Build/Products/Release
-          zip -r YourApp-macOS.zip YourApp.app
+          zip -r Strawberry-macOS.zip Strawberry.app
 
       # 5. Upload the zipped app to GitHub
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-app
-          path: build/Build/Products/Release/YourApp-macOS.zip
+          path: build/Build/Products/Release/Strawberry-macOS.zip
